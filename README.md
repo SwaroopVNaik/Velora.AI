@@ -65,6 +65,8 @@ existing design while applying targeted updates.
    - The server verifies the token using Google's remote JSON Web Key Set.
    - Velora.AI creates or updates the MongoDB user and returns a signed JWT in
      an HTTP-only cookie.
+   - Protected requests also send a verified Firebase bearer token so sessions
+     survive browsers blocking cross-site cookies in split deployments.
 
 2. **Prompt submission**
    - The user enters a website description on the generation page.
@@ -156,7 +158,7 @@ flowchart LR
     C --> F[Firebase Google Authentication]
     F -->|Firebase ID token| A[Express Authentication API]
     A -->|HTTP-only JWT cookie| C
-    C -->|Credentialed REST requests| API[Node.js + Express API]
+    C -->|Cookie or Firebase bearer token| API[Node.js + Express API]
     API --> AUTH[Authentication Middleware]
     AUTH --> WC[Website Controller]
     AUTH --> PC[Payment Controller]
@@ -406,8 +408,10 @@ MOCK_PAYMENTS_ENABLED=true
 
 ## 🔌 API Overview
 
-All protected requests use the `token` HTTP-only cookie and must include
-credentials. The examples below assume the base URL
+Protected requests accept either the `token` HTTP-only cookie or a verified
+Firebase ID token in the `Authorization: Bearer <token>` header. The client
+uses both so authentication remains reliable when the frontend and API are
+deployed on different sites. The examples below assume the base URL
 `http://localhost:8000`.
 
 ### Authentication APIs
@@ -494,6 +498,8 @@ Replace the following paths with captured application screenshots:
   remote signing keys, RS256, issuer, and audience checks.
 - **HTTP-only sessions**: The application JWT is inaccessible to browser
   JavaScript and expires after seven days.
+- **Cross-site session fallback**: Verified Firebase bearer tokens keep
+  protected requests authenticated when browsers block third-party cookies.
 - **Production cookie controls**: Cookies use `Secure` and `SameSite=None` in
   production for HTTPS cross-origin deployments.
 - **Protected routes**: Website, generation, editing, deployment, deletion, and

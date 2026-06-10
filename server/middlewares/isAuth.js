@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken"
 import User from "../models/user.model.js"
+import { verifyFirebaseIdToken } from "../config/firebaseAuth.js"
 
 const isProduction = process.env.NODE_ENV === "production"
 const authCookieOptions = {
@@ -24,26 +25,74 @@ const decodeToken = (token) => {
     }
 }
 
-const isAuth=async (req,res,next)=>{
-try {
-    const token=req.cookies.token
-    if(!token){
-        return res.status(401).json({message:"authentication required"})
+const getBearerToken = (req) => {
+    const authorization=req.get("authorization")
+    if(!authorization){
+        return null
     }
 
-     const decoded=decodeToken(token)
-     if(!decoded){
-        clearAuthCookie(res)
-        return res.status(401).json({message:"invalid or expired token"})
-     }
+    const [scheme,token]=authorization.split(" ")
+    return scheme?.toLowerCase() === "bearer" && token ? token : null
+}
 
-     req.user=await User.findById(decoded.sub)
-     if(!req.user){
-        clearAuthCookie(res)
-        return res.status(401).json({message:"user not found"})
-     }
+const findFirebaseUser = async (idToken) => {
+    try {
+        const firebaseUser=await verifyFirebaseIdToken(idToken)
+        if(!firebaseUser.email || !firebaseUser.email_verified){
+            return null
+        }
 
-     next()
+        const normalizedEmail=firebaseUser.email.trim().toLowerCase()
+        return User.findOne({
+            $or:[
+                {firebaseUid:firebaseUser.uid},
+                {email:normalizedEmail}
+            ]
+        })
+    } catch {
+        return null
+    }
+}
+
+const authenticateRequest = async (req,res) => {
+    const cookieToken=req.cookies.token
+    const bearerToken=getBearerToken(req)
+
+    if(cookieToken){
+        const decoded=decodeToken(cookieToken)
+        if(decoded){
+            const user=await User.findById(decoded.sub)
+            if(user){
+                return {user,hasCredentials:true}
+            }
+        }
+        clearAuthCookie(res)
+    }
+
+    if(bearerToken){
+        const user=await findFirebaseUser(bearerToken)
+        if(user){
+            return {user,hasCredentials:true}
+        }
+    }
+
+    return {
+        user:null,
+        hasCredentials:Boolean(cookieToken || bearerToken)
+    }
+}
+
+const isAuth=async (req,res,next)=>{
+try {
+    const {user,hasCredentials}=await authenticateRequest(req,res)
+    if(!user){
+        return res.status(401).json({
+            message:hasCredentials ? "invalid or expired token" : "authentication required"
+        })
+    }
+
+    req.user=user
+    next()
 } catch (error) {
     return res.status(500).json({message:"unable to authenticate user"})
 }
@@ -51,21 +100,8 @@ try {
 
 export const optionalAuth=async (req,res,next)=>{
 try {
-    const token=req.cookies.token
-    if(!token){
-        return next()
-    }
-
-    const decoded=decodeToken(token)
-    if(!decoded){
-        clearAuthCookie(res)
-        return next()
-    }
-
-    req.user=await User.findById(decoded.sub)
-    if(!req.user){
-        clearAuthCookie(res)
-    }
+    const {user}=await authenticateRequest(req,res)
+    req.user=user
 
     next()
 } catch (error) {

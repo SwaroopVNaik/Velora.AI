@@ -3,21 +3,42 @@ import { useEffect } from 'react'
 import { serverUrl } from '../config'
 import { useDispatch } from 'react-redux'
 import { setAuthLoading, setUserData } from '../redux/userSlice'
+import { auth } from '../firebase'
 
 function useGetCurrentUser() {
     const dispatch=useDispatch()
     useEffect(() => {
-        const getCurrentUser = async () => {
+        let isActive=true
+
+        const getCurrentUser=async () => {
             try {
+              await auth.authStateReady()
+              if(!isActive){
+                return
+              }
+
+              if(!auth.currentUser){
+                dispatch(setUserData(null))
+                return
+              }
+
               const result=await axios.get(`${serverUrl}/api/user/me`,{withCredentials:true})
-              dispatch(setUserData(result.data))
+              if(isActive){
+                dispatch(setUserData(result.data))
+              }
             } catch {
-              dispatch(setUserData(null))
+              if(isActive){
+                dispatch(setUserData(null))
+              }
             } finally {
-              dispatch(setAuthLoading(false))
+              if(isActive){
+                dispatch(setAuthLoading(false))
+              }
             }
         }
+
         getCurrentUser()
+        return () => {isActive=false}
     }, [dispatch])
 }
 
